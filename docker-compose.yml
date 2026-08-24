@@ -2,12 +2,12 @@ version: "3.9"
 
 services:
   # ─────────────────────────────────────────────
-  # PostgreSQL 15
+  # PostgreSQL 15 Database (Auto-seeds DPU 138 theses)
   # ─────────────────────────────────────────────
   postgres:
     image: postgres:15-alpine
     container_name: elib_postgres
-    restart: unless-stopped
+    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-elib}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-elib_secret}
@@ -19,17 +19,17 @@ services:
       - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-elib} -d ${POSTGRES_DB:-elib_db}"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   # ─────────────────────────────────────────────
-  # Redis 7 with AOF persistence
+  # Redis 7 In-Memory Cache
   # ─────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: elib_redis
-    restart: unless-stopped
+    restart: always
     command: redis-server --appendonly yes --appendfsync everysec
     volumes:
       - redis_data:/data
@@ -37,28 +37,29 @@ services:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   # ─────────────────────────────────────────────
-  # Rust / Axum backend
+  # Rust / Axum Backend API (Port 3000)
   # ─────────────────────────────────────────────
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: elib_backend
-    restart: unless-stopped
+    restart: always
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-elib}:${POSTGRES_PASSWORD:-elib_secret}@postgres:5432/${POSTGRES_DB:-elib_db}
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_change_in_production}
+      JWT_SECRET: ${JWT_SECRET:-dpu_library_super_secret_jwt_key_2026_production}
       JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-24}
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 3000
       WORKER_INTERVAL_SECS: 30
       RUST_LOG: info
+      ALLOWED_ORIGINS: "*"
     ports:
       - "3000:3000"
     depends_on:
@@ -66,25 +67,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-
-  # ─────────────────────────────────────────────
-  # React / Vite frontend dev server
-  # ─────────────────────────────────────────────
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: elib_frontend
-    restart: unless-stopped
-    environment:
-      VITE_API_BASE_URL: http://localhost:3000
-    ports:
-      - "5173:5173"
-    depends_on:
-      - backend
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
 
 volumes:
   postgres_data:
