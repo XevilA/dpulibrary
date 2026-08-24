@@ -70,11 +70,16 @@ services:
       - "3333:3000"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.elib-backend.rule=Host(`api.dpulibrary.space`)"
-      - "traefik.http.routers.elib-backend.entrypoints=https"
-      - "traefik.http.routers.elib-backend.tls=true"
-      - "traefik.http.routers.elib-backend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.elib-backend.loadbalancer.server.port=3000"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.elib-http.rule=Host(`api.dpulibrary.space`)"
+      - "traefik.http.routers.elib-http.entrypoints=http"
+      - "traefik.http.routers.elib-http.service=elib-svc"
+      - "traefik.http.routers.elib-https.rule=Host(`api.dpulibrary.space`)"
+      - "traefik.http.routers.elib-https.entrypoints=https"
+      - "traefik.http.routers.elib-https.tls=true"
+      - "traefik.http.routers.elib-https.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.elib-https.service=elib-svc"
+      - "traefik.http.services.elib-svc.loadbalancer.server.port=3000"
     depends_on:
       postgres:
         condition: service_healthy
