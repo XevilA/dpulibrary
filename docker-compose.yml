@@ -16,12 +16,15 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-elib} -d ${POSTGRES_DB:-elib_db}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - default
+      - coolify
 
   # ─────────────────────────────────────────────
   # Redis 7 In-Memory Cache
@@ -34,15 +37,18 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - default
+      - coolify
 
   # ─────────────────────────────────────────────
-  # Rust / Axum Backend API (Port 3000)
+  # Rust / Axum Backend API (Port 3333 on host, 3000 in container)
   # ─────────────────────────────────────────────
   backend:
     build:
@@ -61,13 +67,28 @@ services:
       RUST_LOG: info
       ALLOWED_ORIGINS: "*"
     ports:
-      - "3000:3000"
+      - "3333:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.elib-backend.rule=Host(`api.dpulibrary.space`)"
+      - "traefik.http.routers.elib-backend.entrypoints=https"
+      - "traefik.http.routers.elib-backend.tls=true"
+      - "traefik.http.routers.elib-backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.elib-backend.loadbalancer.server.port=3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - default
+      - coolify
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  default:
+  coolify:
+    external: true
