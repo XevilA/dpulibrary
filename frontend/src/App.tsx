@@ -44,7 +44,18 @@ export default function App() {
 
   // ── Fetch featured books (hero banner) ───────────────────────────────
   const fetchFeatured = useCallback(() => {
-    booksApi.featured().then(setFeaturedBooks).catch(console.error);
+    booksApi
+      .featured()
+      .then((res) => {
+        if (Array.isArray(res)) {
+          setFeaturedBooks(res);
+        } else if (res && Array.isArray((res as any).data)) {
+          setFeaturedBooks((res as any).data);
+        } else {
+          setFeaturedBooks([]);
+        }
+      })
+      .catch(() => setFeaturedBooks([]));
   }, []);
 
   useEffect(() => {
@@ -53,7 +64,18 @@ export default function App() {
 
   // ── Fetch popular books (numbered list) ──────────────────────────────
   const fetchPopular = useCallback(() => {
-    booksApi.popular().then(setPopularBooks).catch(console.error);
+    booksApi
+      .popular()
+      .then((res) => {
+        if (Array.isArray(res)) {
+          setPopularBooks(res);
+        } else if (res && Array.isArray((res as any).data)) {
+          setPopularBooks((res as any).data);
+        } else {
+          setPopularBooks([]);
+        }
+      })
+      .catch(() => setPopularBooks([]));
   }, []);
 
   useEffect(() => {
@@ -65,8 +87,16 @@ export default function App() {
     setIsCatalogLoading(true);
     booksApi
       .list({ search, genre, page, limit: 18 })
-      .then(setCatalogData)
-      .catch(console.error)
+      .then((res) => {
+        if (res && Array.isArray(res.data)) {
+          setCatalogData(res);
+        } else {
+          setCatalogData({ data: [], total: 0, page: 1, limit: 18, total_pages: 0 });
+        }
+      })
+      .catch(() => {
+        setCatalogData({ data: [], total: 0, page: 1, limit: 18, total_pages: 0 });
+      })
       .finally(() => setIsCatalogLoading(false));
   }, [search, genre, page]);
 

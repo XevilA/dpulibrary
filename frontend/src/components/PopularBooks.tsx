@@ -11,7 +11,8 @@ interface PopularBooksProps {
 }
 
 export default function PopularBooks({ books, onSelectBook }: PopularBooksProps) {
-  if (!books.length) return null;
+  const bookList = Array.isArray(books) ? books : [];
+  if (!bookList.length) return null;
 
   return (
     <section id="popular" className="bg-white border-t border-gray-100">
@@ -25,7 +26,7 @@ export default function PopularBooks({ books, onSelectBook }: PopularBooksProps)
 
         {/* Numbered list — 2-col responsive grid matching reference design */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {books.map((book, idx) => (
+          {bookList.map((book, idx) => (
             <article
               key={book.id}
               onClick={() => onSelectBook(book)}

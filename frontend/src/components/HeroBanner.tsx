@@ -22,7 +22,7 @@ const SLIDE_STYLES = [
 export default function HeroBanner({ books = [], onSelectBook }: HeroBannerProps) {
   const [activeIdx, setActiveIdx] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const featured = (books || []).slice(0, 6);
+  const featured = Array.isArray(books) ? books.slice(0, 6) : [];
 
   const scrollTo = (idx: number) => {
     const container = scrollRef.current;

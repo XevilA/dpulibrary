@@ -115,7 +115,7 @@ export default function BookGrid({
       )}
 
       {/* Empty state */}
-      {!isLoading && data && data.data.length === 0 && (
+      {!isLoading && data && (!Array.isArray(data.data) || data.data.length === 0) && (
         <div className="flex flex-col items-center justify-center py-20 text-gray-400 bg-white rounded-2xl border border-gray-100">
           <Library size={44} className="mb-3 opacity-25" />
           <p className="font-semibold text-gray-700">ไม่พบหนังสือที่ค้นหา</p>
@@ -133,7 +133,7 @@ export default function BookGrid({
       )}
 
       {/* Grid — Compact Cover Cards */}
-      {!isLoading && data && data.data.length > 0 && (
+      {!isLoading && data && Array.isArray(data.data) && data.data.length > 0 && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-x-4 gap-y-6">
             {data.data.map((book) => (
