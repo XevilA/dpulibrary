@@ -1,12 +1,9 @@
-# ─────────────────────────────────────────────────────────────
-# Stage 1: Builder
-# ─────────────────────────────────────────────────────────────
-FROM rust:1.79-bookworm AS builder
+FROM rust:latest AS builder
 
 WORKDIR /app
 
-# Cache dependencies first
-COPY Cargo.toml ./
+# Cache dependencies first with locked versions
+COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src && echo 'fn main() {}' > src/main.rs
 RUN cargo build --release
 RUN rm -f target/release/deps/elib_backend*

@@ -2,7 +2,6 @@
 /backend/target/
 backend/target/
 **/*.rs.bk
-Cargo.lock
 
 # Node / Frontend
 /frontend/node_modules/
