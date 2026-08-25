@@ -80,13 +80,13 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
     }
   };
 
-  // ── Single Real Firebase Google Sign-In Popup Handler ───────────────────────
+  // ── Official Firebase Google Sign-In Popup Handler ─────────────────────────
   const handleFirebaseGoogleSignIn = async () => {
     setError(null);
     setGoogleLoading(true);
 
     try {
-      // 1. Try Firebase Auth popup
+      // 1. Firebase Auth popup with @dpu.ac.th enforcement
       const googleRes = await signInWithGoogleFirebase();
 
       if (!googleRes.email?.toLowerCase().endsWith('@dpu.ac.th')) {
@@ -112,34 +112,10 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
         return;
       }
 
-      // Fallback: Check if standard OAuth 2.0 token flow works
-      if (window.google?.accounts?.oauth2) {
-        try {
-          const client = window.google.accounts.oauth2.initTokenClient({
-            client_id: '1038472918234-dpu-library-oauth-client.apps.googleusercontent.com',
-            scope: 'email profile openid',
-            hd: 'dpu.ac.th',
-            callback: async (tokenResponse) => {
-              if (tokenResponse.access_token) {
-                const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                  headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-                });
-                const profile = await res.json();
-                if (!profile.email?.toLowerCase().endsWith('@dpu.ac.th')) {
-                  setError('กรุณาใช้บัญชี Google ของมหาวิทยาลัย (@dpu.ac.th) เท่านั้น');
-                  setGoogleLoading(false);
-                  return;
-                }
-                await googleLogin({ email: profile.email, name: profile.name });
-                handleClose();
-              }
-            },
-          });
-          client.requestAccessToken();
-          return;
-        } catch (fallbackErr) {
-          console.warn(fallbackErr);
-        }
+      if (err.code === 'auth/unauthorized-domain') {
+        setError('โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Console (กรุณาเพิ่ม Authorized Domain)');
+        setGoogleLoading(false);
+        return;
       }
 
       const msg =
