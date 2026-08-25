@@ -1,5 +1,6 @@
 // src/components/PdfReaderModal.tsx
-// Full-featured built-in In-App PDF Reader / E-Book Viewer for borrowed items
+// Full-featured In-App PDF Reader — uses pdf.js CDN to bypass X-Frame-Options SAMEORIGIN
+// blocking from libdoc.dpu.ac.th
 
 import { useState, useEffect } from 'react';
 import {
@@ -11,8 +12,6 @@ import {
   RotateCcw,
   FileText,
   Clock,
-  ChevronLeft,
-  ChevronRight,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -26,6 +25,9 @@ interface PdfReaderModalProps {
   onExpire: () => void;
 }
 
+// Mozilla PDF.js viewer URL (CDN) — works around X-Frame-Options by loading PDF client-side
+const PDFJS_VIEWER = 'https://mozilla.github.io/pdf.js/web/viewer.html';
+
 export default function PdfReaderModal({
   book,
   onClose,
@@ -35,6 +37,7 @@ export default function PdfReaderModal({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [isReturning, setIsReturning] = useState(false);
+  const [pdfLoadError, setPdfLoadError] = useState(false);
 
   // Esc key to close or exit fullscreen
   useEffect(() => {
@@ -57,7 +60,7 @@ export default function PdfReaderModal({
     try {
       await onReturn();
       onClose();
-    } catch (err) {
+    } catch {
       alert('เกิดข้อผิดพลาดในการคืนหนังสือ');
     } finally {
       setIsReturning(false);
@@ -65,6 +68,9 @@ export default function PdfReaderModal({
   };
 
   const pdfUrl = book.pdf_url || '';
+
+  // Build PDF.js viewer URL — load PDF directly into the viewer
+  const viewerUrl = pdfUrl ? `${PDFJS_VIEWER}?file=${encodeURIComponent(pdfUrl)}` : '';
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-950/90 backdrop-blur-md">
@@ -96,7 +102,7 @@ export default function PdfReaderModal({
             </div>
           )}
 
-          {/* Zoom controls */}
+          {/* Zoom controls (for the outer container) */}
           <div className="hidden md:flex items-center gap-1 bg-gray-800/80 rounded-xl p-1 border border-gray-700">
             <button
               onClick={() => setZoom((z) => Math.max(50, z - 15))}
@@ -124,7 +130,7 @@ export default function PdfReaderModal({
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
 
-          {/* External Window */}
+          {/* External Window — open direct PDF URL */}
           {pdfUrl && (
             <a
               href={pdfUrl}
@@ -160,18 +166,50 @@ export default function PdfReaderModal({
 
       {/* Main PDF Viewer Frame */}
       <div className="flex-1 w-full h-full bg-gray-900 overflow-auto flex items-center justify-center p-2 sm:p-4">
-        {pdfUrl ? (
+        {pdfUrl && !pdfLoadError ? (
           <div
             className="w-full h-full max-w-6xl bg-white rounded-2xl overflow-hidden shadow-2xl transition-transform duration-200"
             style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
           >
+            {/* Use PDF.js CDN viewer which can load cross-origin PDFs without iframe restrictions */}
             <iframe
-              src={`${pdfUrl}#toolbar=1&navpanes=1&scrollbar=1`}
+              src={viewerUrl}
               title={book.title}
               className="w-full h-full min-h-[85vh] border-0"
+              onError={() => setPdfLoadError(true)}
+              allow="fullscreen"
             />
           </div>
+        ) : pdfUrl && pdfLoadError ? (
+          /* Fallback: show open buttons */
+          <div className="text-center p-8 bg-gray-800 text-gray-300 rounded-3xl max-w-md border border-gray-700 space-y-5">
+            <FileText size={48} className="mx-auto text-purple-400 opacity-60" />
+            <div>
+              <h3 className="font-bold text-lg text-white">ไม่สามารถแสดง PDF ในหน้าต่างนี้ได้</h3>
+              <p className="text-xs text-gray-400 mt-2">
+                เนื่องจากเซิร์ฟเวอร์ต้นทางของ DPU จำกัดการแสดงผลแบบฝัง กรุณาเปิดในแท็บใหม่
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <a
+                href={pdfUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-center gap-2 px-5 py-3 text-sm font-bold text-white bg-[#6021F5] rounded-xl hover:opacity-90 transition-all shadow-sm"
+              >
+                <ExternalLink size={15} />
+                เปิด PDF ในแท็บใหม่
+              </a>
+              <button
+                onClick={onClose}
+                className="px-5 py-2 text-xs font-semibold text-gray-400 hover:text-white transition-colors"
+              >
+                ปิดหน้าต่าง
+              </button>
+            </div>
+          </div>
         ) : (
+          /* No PDF URL */
           <div className="text-center p-8 bg-gray-800 text-gray-300 rounded-3xl max-w-md border border-gray-700 space-y-4">
             <FileText size={48} className="mx-auto text-purple-400 opacity-60" />
             <div>
