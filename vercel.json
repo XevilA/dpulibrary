@@ -4,7 +4,15 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/api/:path*",
+      "destination": "http://194.233.80.21:3333/api/:path*"
+    },
+    {
+      "source": "/health",
+      "destination": "http://194.233.80.21:3333/health"
+    },
+    {
+      "source": "/((?!covers|assets|favicon|dpu-logo|robots|sitemap).*.)",
       "destination": "/index.html"
     }
   ]
