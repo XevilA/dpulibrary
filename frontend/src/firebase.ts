@@ -1,10 +1,16 @@
-// src/firebase.ts — Firebase Configuration & Authentication setup
-// Handles official Google Sign-In popup with @dpu.ac.th hosted domain enforcement
+// src/firebase.ts — Firebase Configuration & Authentication
+// Uses signInWithRedirect (not popup) for better mobile & browser compatibility
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signOut,
+} from 'firebase/auth';
 
-// Official DPU Library Firebase project configuration
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDFGRMe1FGmOd9qlSkW7Uxpf2klyXmoNGs",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "dpuelibrary.firebaseapp.com",
@@ -15,34 +21,61 @@ const firebaseConfig = {
   measurementId: "G-E65HJMQPH3"
 };
 
-// Initialize Firebase App singleton
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-
-// Initialize Firebase Auth
 export const auth = getAuth(app);
 
-// Initialize Google Auth Provider with DPU Hosted Domain constraint
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
-  hd: 'dpu.ac.th', // Enforce DPU institutional email @dpu.ac.th
   prompt: 'select_account',
+  // Removed hd: 'dpu.ac.th' — domain enforcement is done by backend after getting email
 });
 
 /**
- * Sign in with Google Popup via Firebase Auth
+ * Try popup first; if blocked (mobile/Safari), fall back to redirect
  */
 export async function signInWithGoogleFirebase() {
-  const result = await signInWithPopup(auth, googleProvider);
-  const user = result.user;
-  const idToken = await user.getIdToken();
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    const idToken = await result.user.getIdToken();
+    return {
+      user: result.user,
+      idToken,
+      email: result.user.email,
+      displayName: result.user.displayName,
+      photoURL: result.user.photoURL,
+    };
+  } catch (err: any) {
+    // Popup blocked — fall back to redirect
+    if (
+      err.code === 'auth/popup-blocked' ||
+      err.code === 'auth/popup-closed-by-user'
+    ) {
+      await signInWithRedirect(auth, googleProvider);
+      // Page will reload; result is handled in useFirebaseRedirectResult
+      throw err;
+    }
+    throw err;
+  }
+}
 
-  return {
-    user,
-    idToken,
-    email: user.email,
-    displayName: user.displayName,
-    photoURL: user.photoURL,
-  };
+/**
+ * Call once on app mount to capture redirect result after signInWithRedirect
+ */
+export async function getFirebaseRedirectResult() {
+  try {
+    const result = await getRedirectResult(auth);
+    if (!result) return null;
+    const idToken = await result.user.getIdToken();
+    return {
+      user: result.user,
+      idToken,
+      email: result.user.email,
+      displayName: result.user.displayName,
+      photoURL: result.user.photoURL,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export { signOut };

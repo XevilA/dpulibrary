@@ -1,5 +1,5 @@
 // src/App.tsx — Root application component
-// Orchestrates Views: Library Home, Book Detail Page, and Admin Dashboard.
+// Orchestrates Views: Library Home, My Shelf (ชั้นหนังสือ), Book Detail Page, and Admin Dashboard.
 
 import { useEffect, useState, useCallback } from 'react';
 import Navbar from './components/Navbar';
@@ -10,15 +10,19 @@ import LoginModal from './components/LoginModal';
 import BookDetailPage from './components/BookDetailPage';
 import AdminBookModal from './components/AdminBookModal';
 import AdminDashboard from './components/AdminDashboard';
+import MyShelf from './components/MyShelf';
+import PdfReaderModal from './components/PdfReaderModal';
 import { booksApi } from './api/client';
 import { useAuthStore } from './store/authStore';
-import type { BookSummary, PaginatedBooks } from './types';
+import { getFirebaseRedirectResult } from './firebase';
+import type { BookSummary, PaginatedBooks, UserBorrowEntry } from './types';
+import { BookMarked } from 'lucide-react';
 
 export default function App() {
-  const { user, hydrate } = useAuthStore();
+  const { user, hydrate, googleLogin } = useAuthStore();
 
   // ── View & Navigation State ──────────────────────────────────────────────
-  const [currentView, setCurrentView] = useState<'library' | 'admin'>('library');
+  const [currentView, setCurrentView] = useState<'library' | 'admin' | 'shelf'>('library');
   const [selectedBook, setSelectedBook] = useState<BookSummary | null>(null);
 
   // ── Data state ──────────────────────────────────────────────────────────
@@ -37,10 +41,29 @@ export default function App() {
   const [adminModalOpen, setAdminModalOpen] = useState(false);
   const [bookToEdit, setBookToEdit] = useState<BookSummary | null>(null);
 
+  // ── PDF Reader state ──────────────────────────────────────────────────
+  const [pdfEntry, setPdfEntry] = useState<UserBorrowEntry | null>(null);
+
   // ── Hydrate auth from localStorage on mount ───────────────────────────
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  // ── Handle Firebase redirect result (after signInWithRedirect) ────────
+  useEffect(() => {
+    getFirebaseRedirectResult().then(async (result) => {
+      if (!result) return;
+      try {
+        await googleLogin({
+          credential: result.idToken,
+          email: result.email ?? undefined,
+          name: result.displayName ?? 'นักศึกษา DPU',
+        });
+      } catch {
+        // Silently handle — user will see login error if they open modal
+      }
+    });
+  }, [googleLogin]);
 
   // ── Fetch featured books (hero banner) ───────────────────────────────
   const fetchFeatured = useCallback(() => {
@@ -137,6 +160,16 @@ export default function App() {
     setAdminModalOpen(true);
   };
 
+  // ── PDF Reader ────────────────────────────────────────────────────────
+  const handleReadBook = (entry: UserBorrowEntry) => {
+    setPdfEntry(entry);
+  };
+
+  const handleReturnFromPdf = async () => {
+    if (!pdfEntry) return;
+    await booksApi.returnByBorrowId(pdfEntry.borrow_id);
+  };
+
   return (
     <div className="min-h-screen bg-[#FDFDFE] text-gray-900 flex flex-col selection:bg-purple-100 selection:text-purple-900">
       {/* 1. Admin Dashboard View */}
@@ -156,8 +189,46 @@ export default function App() {
             searchValue={search}
           />
 
-          {/* 2. Full Book Detail Page View */}
-          {selectedBook ? (
+          {/* My Shelf Tab Button (shown when logged in) */}
+          {user && (
+            <div className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
+              <div className="max-w-7xl mx-auto px-4 flex gap-0">
+                <button
+                  onClick={() => { setCurrentView('library'); setSelectedBook(null); }}
+                  className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-colors ${
+                    currentView !== 'shelf'
+                      ? 'border-[#6021F5] text-[#6021F5]'
+                      : 'border-transparent text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  📚 คลังหนังสือ
+                </button>
+                <button
+                  onClick={() => setCurrentView('shelf')}
+                  className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-colors ${
+                    currentView === 'shelf'
+                      ? 'border-[#6021F5] text-[#6021F5]'
+                      : 'border-transparent text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  <BookMarked size={16} />
+                  ชั้นหนังสือของฉัน
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 2. My Shelf View */}
+          {currentView === 'shelf' && user ? (
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 w-full">
+              <div className="mb-6">
+                <h2 className="text-2xl font-extrabold text-gray-900">📖 ชั้นหนังสือของฉัน</h2>
+                <p className="text-gray-500 text-sm mt-1">หนังสือที่คุณกำลังยืมอยู่ในขณะนี้</p>
+              </div>
+              <MyShelf onReadBook={handleReadBook} />
+            </div>
+          ) : selectedBook ? (
+            /* 3. Full Book Detail Page View */
             <BookDetailPage
               bookSummary={selectedBook}
               onBack={() => setSelectedBook(null)}
@@ -166,7 +237,7 @@ export default function App() {
               onEditBook={handleOpenEditBook}
             />
           ) : (
-            /* 3. Library Home Catalog View */
+            /* 4. Library Home Catalog View */
             <>
               {/* Hero banner carousel */}
               <HeroBanner books={featuredBooks} onSelectBook={setSelectedBook} />
@@ -209,14 +280,16 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-6 text-sm text-gray-600">
                   <button
-                    onClick={() => {
-                      setSelectedBook(null);
-                      setCurrentView('library');
-                    }}
+                    onClick={() => { setSelectedBook(null); setCurrentView('library'); }}
                     className="hover:text-purple-700 transition-colors"
                   >
                     อีบุ๊กทั้งหมด
                   </button>
+                  {user && (
+                    <button onClick={() => setCurrentView('shelf')} className="hover:text-purple-700 transition-colors">
+                      ชั้นหนังสือของฉัน
+                    </button>
+                  )}
                   {user?.role === 'admin' && (
                     <button
                       onClick={() => setCurrentView('admin')}
@@ -250,6 +323,24 @@ export default function App() {
 
       {/* Login Modal */}
       <LoginModal isOpen={loginOpen} onClose={() => setLoginOpen(false)} />
+
+      {/* PDF Reader Modal (from My Shelf) */}
+      {pdfEntry && (
+        <PdfReaderModal
+          book={{
+            borrow_id: pdfEntry.borrow_id,
+            book_id: pdfEntry.book_id,
+            title: pdfEntry.title,
+            author: pdfEntry.author,
+            pdf_url: pdfEntry.pdf_url,
+            expires_at: pdfEntry.expires_at,
+            max_borrow_days: pdfEntry.max_borrow_days,
+          }}
+          onClose={() => setPdfEntry(null)}
+          onReturn={handleReturnFromPdf}
+          onExpire={() => setPdfEntry(null)}
+        />
+      )}
     </div>
   );
 }

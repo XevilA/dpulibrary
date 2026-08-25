@@ -1,6 +1,6 @@
 // src/components/PdfReaderModal.tsx
-// Full-featured In-App PDF Reader — uses pdf.js CDN to bypass X-Frame-Options SAMEORIGIN
-// blocking from libdoc.dpu.ac.th
+// In-App PDF Reader using Google Docs Viewer — bypasses X-Frame-Options & CORS restrictions
+// Also accepts UserBorrowEntry (from MyShelf) or legacy Book props
 
 import { useState, useEffect } from 'react';
 import {
@@ -14,19 +14,52 @@ import {
   Clock,
   ZoomIn,
   ZoomOut,
+  Loader2,
 } from 'lucide-react';
-import type { Book } from '../types';
-import CountdownBadge from './CountdownBadge';
+import type { UserBorrowEntry } from '../types';
 
 interface PdfReaderModalProps {
-  book: Book;
+  // Can receive either a UserBorrowEntry (from MyShelf) or basic book info
+  book: {
+    borrow_id?: string;
+    book_id?: string;
+    id?: string;
+    title: string;
+    author: string;
+    pdf_url?: string | null;
+    expires_at?: string | null;
+    max_borrow_days?: number;
+  };
   onClose: () => void;
   onReturn: () => Promise<void>;
-  onExpire: () => void;
+  onExpire?: () => void;
 }
 
-// Mozilla PDF.js viewer URL (CDN) — works around X-Frame-Options by loading PDF client-side
-const PDFJS_VIEWER = 'https://mozilla.github.io/pdf.js/web/viewer.html';
+function CountdownLabel({ expiresAt }: { expiresAt: string }) {
+  const [label, setLabel] = useState('');
+  useEffect(() => {
+    const update = () => {
+      const ms = new Date(expiresAt).getTime() - Date.now();
+      if (ms <= 0) { setLabel('หมดอายุแล้ว'); return; }
+      const days = Math.floor(ms / 86400000);
+      const hours = Math.floor((ms % 86400000) / 3600000);
+      if (days > 0) setLabel(`${days}ว ${hours}ชม.`);
+      else {
+        const mins = Math.floor((ms % 3600000) / 60000);
+        setLabel(`${hours}ชม. ${mins}น.`);
+      }
+    };
+    update();
+    const t = setInterval(update, 60000);
+    return () => clearInterval(t);
+  }, [expiresAt]);
+  return <span className="text-xs text-purple-200 font-semibold">{label}</span>;
+}
+
+// Google Docs Viewer — renders PDFs client-side, bypasses X-Frame-Options
+function buildViewerUrl(pdfUrl: string): string {
+  return `https://docs.google.com/viewer?url=${encodeURIComponent(pdfUrl)}&embedded=true`;
+}
 
 export default function PdfReaderModal({
   book,
@@ -37,17 +70,13 @@ export default function PdfReaderModal({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [isReturning, setIsReturning] = useState(false);
-  const [pdfLoadError, setPdfLoadError] = useState(false);
+  const [iframeKey, setIframeKey] = useState(0); // force reload
 
-  // Esc key to close or exit fullscreen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isFullscreen) {
-          setIsFullscreen(false);
-        } else {
-          onClose();
-        }
+        if (isFullscreen) setIsFullscreen(false);
+        else onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -68,15 +97,12 @@ export default function PdfReaderModal({
   };
 
   const pdfUrl = book.pdf_url || '';
-
-  // Build PDF.js viewer URL — load PDF directly into the viewer
-  const viewerUrl = pdfUrl ? `${PDFJS_VIEWER}?file=${encodeURIComponent(pdfUrl)}` : '';
+  const viewerUrl = pdfUrl ? buildViewerUrl(pdfUrl) : '';
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-gray-950/90 backdrop-blur-md">
-      {/* Top E-Reader Control Bar */}
+    <div className="fixed inset-0 z-50 flex flex-col bg-gray-950/95 backdrop-blur-md">
+      {/* Control Bar */}
       <div className="bg-[#181B26] text-white px-4 sm:px-6 py-3 border-b border-gray-800 flex items-center justify-between gap-4 shrink-0 shadow-lg">
-        {/* Left: Book Title & DPU Badge */}
         <div className="flex items-center gap-3 min-w-0">
           <div className="p-1.5 rounded-xl bg-[#6021F5] text-white flex items-center justify-center shrink-0">
             <BookOpen size={18} />
@@ -91,59 +117,49 @@ export default function PdfReaderModal({
           </div>
         </div>
 
-        {/* Right: Borrow Countdown, Controls, Action */}
         <div className="flex items-center gap-2.5 shrink-0">
-          {/* Remaining Time Countdown */}
+          {/* Countdown */}
           {book.expires_at && (
             <div className="hidden sm:flex items-center gap-2 bg-purple-950/70 border border-purple-800/80 px-3 py-1.5 rounded-xl">
               <Clock size={13} className="text-purple-300" />
-              <span className="text-xs text-purple-200 font-medium">เวลายืมคงเหลือ:</span>
-              <CountdownBadge expiresAt={book.expires_at} onExpire={onExpire} />
+              <span className="text-xs text-purple-300">เหลือ:</span>
+              <CountdownLabel expiresAt={book.expires_at} />
             </div>
           )}
 
-          {/* Zoom controls (for the outer container) */}
+          {/* Zoom */}
           <div className="hidden md:flex items-center gap-1 bg-gray-800/80 rounded-xl p-1 border border-gray-700">
-            <button
-              onClick={() => setZoom((z) => Math.max(50, z - 15))}
-              className="p-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-              title="ย่อขนาด"
-            >
+            <button onClick={() => setZoom((z) => Math.max(50, z - 15))} className="p-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg" title="ย่อ">
               <ZoomOut size={15} />
             </button>
             <span className="text-xs font-mono px-1.5 text-gray-300">{zoom}%</span>
-            <button
-              onClick={() => setZoom((z) => Math.min(200, z + 15))}
-              className="p-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-              title="ขยายขนาด"
-            >
+            <button onClick={() => setZoom((z) => Math.min(200, z + 15))} className="p-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg" title="ขยาย">
               <ZoomIn size={15} />
             </button>
           </div>
 
-          {/* Fullscreen Toggle */}
+          {/* Reload iframe */}
           <button
-            onClick={() => setIsFullscreen(!isFullscreen)}
+            onClick={() => setIframeKey((k) => k + 1)}
             className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700 transition-colors"
-            title={isFullscreen ? 'ออกจากโหมดเต็มหน้าจอ' : 'เต็มหน้าจอ'}
+            title="โหลดซ้ำ"
           >
+            <Loader2 size={15} />
+          </button>
+
+          {/* Fullscreen */}
+          <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700">
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
 
-          {/* External Window — open direct PDF URL */}
+          {/* Open in new tab (direct PDF) */}
           {pdfUrl && (
-            <a
-              href={pdfUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700 transition-colors"
-              title="เปิดในแท็บใหม่"
-            >
+            <a href={pdfUrl} target="_blank" rel="noreferrer" className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700" title="เปิดในแท็บใหม่">
               <ExternalLink size={16} />
             </a>
           )}
 
-          {/* Quick Return Book Button */}
+          {/* Return */}
           <button
             onClick={handleReturnClick}
             disabled={isReturning}
@@ -153,80 +169,43 @@ export default function PdfReaderModal({
             <span className="hidden sm:inline">คืนหนังสือ</span>
           </button>
 
-          {/* Close Reader */}
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl bg-red-600/80 hover:bg-red-600 text-white transition-colors ml-1"
-            title="ปิดหน้าต่างอ่าน"
-          >
+          {/* Close */}
+          <button onClick={onClose} className="p-2 rounded-xl bg-red-600/80 hover:bg-red-600 text-white transition-colors ml-1" title="ปิด">
             <X size={18} />
           </button>
         </div>
       </div>
 
-      {/* Main PDF Viewer Frame */}
+      {/* PDF Viewer */}
       <div className="flex-1 w-full h-full bg-gray-900 overflow-auto flex items-center justify-center p-2 sm:p-4">
-        {pdfUrl && !pdfLoadError ? (
+        {pdfUrl ? (
           <div
             className="w-full h-full max-w-6xl bg-white rounded-2xl overflow-hidden shadow-2xl transition-transform duration-200"
             style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
           >
-            {/* Use PDF.js CDN viewer which can load cross-origin PDFs without iframe restrictions */}
+            {/* Google Docs Viewer — works with cross-origin PDFs without X-Frame-Options issues */}
             <iframe
+              key={iframeKey}
               src={viewerUrl}
               title={book.title}
               className="w-full h-full min-h-[85vh] border-0"
-              onError={() => setPdfLoadError(true)}
               allow="fullscreen"
             />
           </div>
-        ) : pdfUrl && pdfLoadError ? (
-          /* Fallback: show open buttons */
-          <div className="text-center p-8 bg-gray-800 text-gray-300 rounded-3xl max-w-md border border-gray-700 space-y-5">
-            <FileText size={48} className="mx-auto text-purple-400 opacity-60" />
-            <div>
-              <h3 className="font-bold text-lg text-white">ไม่สามารถแสดง PDF ในหน้าต่างนี้ได้</h3>
-              <p className="text-xs text-gray-400 mt-2">
-                เนื่องจากเซิร์ฟเวอร์ต้นทางของ DPU จำกัดการแสดงผลแบบฝัง กรุณาเปิดในแท็บใหม่
-              </p>
-            </div>
-            <div className="flex flex-col gap-3">
-              <a
-                href={pdfUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center justify-center gap-2 px-5 py-3 text-sm font-bold text-white bg-[#6021F5] rounded-xl hover:opacity-90 transition-all shadow-sm"
-              >
-                <ExternalLink size={15} />
-                เปิด PDF ในแท็บใหม่
-              </a>
-              <button
-                onClick={onClose}
-                className="px-5 py-2 text-xs font-semibold text-gray-400 hover:text-white transition-colors"
-              >
-                ปิดหน้าต่าง
-              </button>
-            </div>
-          </div>
         ) : (
-          /* No PDF URL */
           <div className="text-center p-8 bg-gray-800 text-gray-300 rounded-3xl max-w-md border border-gray-700 space-y-4">
             <FileText size={48} className="mx-auto text-purple-400 opacity-60" />
             <div>
               <h3 className="font-bold text-lg text-white">ไม่พบไฟล์ PDF สำหรับหนังสือเล่มนี้</h3>
-              <p className="text-xs text-gray-400 mt-1">
-                กรุณาติดต่อเจ้าหน้าที่สำนักหอสมุด DPU หรือให้แอดมินอัปเดตลิงก์ PDF
-              </p>
+              <p className="text-xs text-gray-400 mt-1">กรุณาติดต่อเจ้าหน้าที่สำนักหอสมุด DPU หรือให้แอดมินอัปเดตลิงก์ PDF</p>
             </div>
-            <button
-              onClick={onClose}
-              className="px-5 py-2 text-xs font-bold text-white bg-[#6021F5] rounded-xl hover:opacity-90 transition-all"
-            >
-              ปิดหน้าต่าง
-            </button>
+            <button onClick={onClose} className="px-5 py-2 text-xs font-bold text-white bg-[#6021F5] rounded-xl hover:opacity-90">ปิดหน้าต่าง</button>
           </div>
         )}
       </div>
     </div>
   );
 }
+
+// Re-export convenience type for callers
+export type { UserBorrowEntry as ShelfEntry };

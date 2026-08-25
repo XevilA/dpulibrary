@@ -86,19 +86,18 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
     setGoogleLoading(true);
 
     try {
-      // 1. Firebase Auth popup with @dpu.ac.th enforcement
+      // 1. Firebase Auth popup — any Google account allowed, backend enforces @dpu.ac.th
       const googleRes = await signInWithGoogleFirebase();
-
-      if (!googleRes.email?.toLowerCase().endsWith('@dpu.ac.th')) {
-        setError('กรุณาใช้บัญชี Google ของมหาวิทยาลัย (@dpu.ac.th) เท่านั้น');
+      if (!googleRes) {
+        // Redirect flow triggered — page will reload
         setGoogleLoading(false);
         return;
       }
 
-      // 2. Authenticate session with backend
+      // 2. Authenticate session with backend (backend enforces @dpu.ac.th domain)
       await googleLogin({
         credential: googleRes.idToken,
-        email: googleRes.email,
+        email: googleRes.email ?? undefined,
         name: googleRes.displayName || 'นักศึกษา DPU',
       });
 
@@ -106,14 +105,13 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
     } catch (err: any) {
       console.error('Google Sign-In Error:', err);
 
-      // If user closed popup intentionally, don't show error
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-blocked') {
         setGoogleLoading(false);
         return;
       }
 
       if (err.code === 'auth/unauthorized-domain') {
-        setError('โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Console (กรุณาเพิ่ม Authorized Domain)');
+        setError('โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Console — กรุณาแจ้งผู้ดูแลระบบ');
         setGoogleLoading(false);
         return;
       }

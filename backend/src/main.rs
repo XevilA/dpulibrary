@@ -120,6 +120,8 @@ fn build_router(state: AppState) -> Router {
         .route("/api/books/:id",              get(books::handlers::get_book).put(books::handlers::update_book).delete(books::handlers::delete_book))
         .route("/api/books/:id/borrow",       post(books::handlers::borrow_book))
         .route("/api/books/:id/return",       post(books::handlers::return_book))
+        .route("/api/borrows/:id/return",     post(books::handlers::return_by_borrow_id))
+        .route("/api/me/borrows",             get(books::handlers::my_borrows))
         // Admin routes
         .route("/api/admin/stats",            get(books::handlers::get_admin_stats))
         .route("/api/admin/history",          get(books::handlers::get_borrow_history))

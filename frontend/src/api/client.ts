@@ -93,22 +93,32 @@ export const booksApi = {
   },
 
   borrow: async (id: string, days?: number) => {
-    const { data } = await api.post<Book>(`/books/${id}/borrow`, { days });
+    const { data } = await api.post<import('../types').BorrowResponse>(`/books/${id}/borrow`, { days });
     return data;
   },
 
   return: async (id: string) => {
-    const { data } = await api.post<Book>(`/books/${id}/return`);
+    const { data } = await api.post(`/books/${id}/return`);
+    return data;
+  },
+
+  returnByBorrowId: async (borrowId: string) => {
+    const { data } = await api.post(`/borrows/${borrowId}/return`);
+    return data;
+  },
+
+  myBorrows: async () => {
+    const { data } = await api.get<import('../types').UserBorrowEntry[]>('/me/borrows');
     return data;
   },
 
   create: async (payload: import('../types').SaveBookPayload) => {
-    const { data } = await api.post<Book>('/books', payload);
+    const { data } = await api.post<import('../types').Book>('/books', payload);
     return data;
   },
 
   update: async (id: string, payload: import('../types').SaveBookPayload) => {
-    const { data } = await api.put<Book>(`/books/${id}`, payload);
+    const { data } = await api.put<import('../types').Book>(`/books/${id}`, payload);
     return data;
   },
 

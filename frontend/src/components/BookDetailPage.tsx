@@ -99,8 +99,14 @@ export default function BookDetailPage({
     setActionLoading(true);
     setError(null);
     try {
-      const updated = await booksApi.borrow(currentBook.id, selectedDays);
-      setBook(updated);
+      const res = await booksApi.borrow(currentBook.id, selectedDays);
+      // Update local book state to reflect borrow (server keeps status Available for digital books)
+      setBook((prev) => prev ? {
+        ...prev,
+        borrow_count: prev.borrow_count + 1,
+        borrowed_by: user.id,
+        expires_at: res.expires_at,
+      } : prev);
       // Auto open reader upon successful borrowing
       setReaderOpen(true);
     } catch (err: any) {
@@ -114,8 +120,9 @@ export default function BookDetailPage({
     setActionLoading(true);
     setError(null);
     try {
-      const updated = await booksApi.return(currentBook.id);
-      setBook(updated);
+      await booksApi.return(currentBook.id);
+      // Update local state
+      setBook((prev) => prev ? { ...prev, borrowed_by: null, expires_at: null } : prev);
       setReaderOpen(false);
     } catch (err: any) {
       setError(err.response?.data?.error || 'ไม่สามารถคืนหนังสือได้');

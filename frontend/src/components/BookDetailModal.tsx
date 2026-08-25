@@ -56,8 +56,14 @@ export default function BookDetailModal({
     setActionLoading(true);
     setError(null);
     try {
-      const updated = await booksApi.borrow(book.id);
-      setBookDetail(updated);
+      const res = await booksApi.borrow(book.id);
+      // Update local state with borrow result
+      setBookDetail((prev) => prev ? {
+        ...prev,
+        borrow_count: prev.borrow_count + 1,
+        borrowed_by: user.id,
+        expires_at: res.expires_at,
+      } : prev);
       onUpdate();
     } catch (err: any) {
       setError(err.response?.data?.error || 'ไม่สามารถยืมหนังสือได้');
@@ -70,8 +76,8 @@ export default function BookDetailModal({
     setActionLoading(true);
     setError(null);
     try {
-      const updated = await booksApi.return(book.id);
-      setBookDetail(updated);
+      await booksApi.return(book.id);
+      setBookDetail((prev) => prev ? { ...prev, borrowed_by: null, expires_at: null } : prev);
       onUpdate();
     } catch (err: any) {
       setError(err.response?.data?.error || 'ไม่สามารถคืนหนังสือได้');

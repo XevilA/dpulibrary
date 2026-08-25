@@ -98,3 +98,34 @@ export interface BorrowHistoryRecord {
   returned_at: string | null;
   expired: boolean;
 }
+
+/** A borrow entry from /api/me/borrows (user's bookshelf) */
+export interface UserBorrowEntry {
+  borrow_id: string;
+  book_id: string;
+  title: string;
+  author: string;
+  genre: string;
+  cover_url: string;
+  pdf_url?: string | null;
+  language: string;
+  max_borrow_days: number;
+  borrowed_at: string;
+  expires_at: string;
+}
+
+/** Response from POST /api/books/:id/borrow */
+export interface BorrowResponse {
+  message: string;
+  borrow_id: string;
+  book_id: string;
+  expires_at: string;
+  book: {
+    id: string;
+    title: string;
+    author: string;
+    pdf_url?: string | null;
+    max_borrow_days: number;
+  };
+}
+

@@ -1,5 +1,6 @@
-// src/books/handlers.rs — Books CRUD, borrow, and return endpoints
-// Includes Admin management: create, update, delete with PDF & cover support.
+// src/books/handlers.rs — Books CRUD, borrow, return, and user bookshelf endpoints
+// Multi-user borrowing: each user has their own borrow record via user_borrows table.
+// Books remain 'Available' globally; per-user status is checked from user_borrows.
 
 use crate::{
     auth::middleware::AuthUser,
@@ -87,6 +88,44 @@ pub struct PaginatedBooks {
     pub page: u32,
     pub limit: u32,
     pub total_pages: u32,
+}
+
+/// A book with per-user borrow status injected
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct BookWithUserStatus {
+    pub id: Uuid,
+    pub title: String,
+    pub author: String,
+    pub genre: String,
+    pub cover_url: String,
+    pub pdf_url: Option<String>,
+    pub status: String,       // global status (always Available for digital)
+    pub borrowed_by: Option<Uuid>,  // kept for compatibility
+    pub expires_at: Option<chrono::DateTime<Utc>>,
+    pub borrow_count: i32,
+    pub language: String,
+    pub max_borrow_days: i32,
+    pub featured: bool,
+    // Per-user fields
+    pub user_borrowed: bool,
+    pub user_expires_at: Option<chrono::DateTime<Utc>>,
+    pub borrow_id: Option<Uuid>,
+}
+
+/// Borrow record for user bookshelf
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct UserBorrowEntry {
+    pub borrow_id: Uuid,
+    pub book_id: Uuid,
+    pub title: String,
+    pub author: String,
+    pub genre: String,
+    pub cover_url: String,
+    pub pdf_url: Option<String>,
+    pub language: String,
+    pub max_borrow_days: i32,
+    pub borrowed_at: chrono::DateTime<Utc>,
+    pub expires_at: chrono::DateTime<Utc>,
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
@@ -255,7 +294,7 @@ pub async fn get_book(
     Ok(Json(book))
 }
 
-/// POST /api/books (Admin create book / e-book PDF)
+/// POST /api/books (Admin create book)
 pub async fn create_book(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -422,7 +461,10 @@ pub async fn get_admin_stats(
         .fetch_one(&state.db)
         .await?;
 
-    let active_borrows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE status = 'Borrowed'")
+    // Count active borrows from user_borrows table (multi-user aware)
+    let active_borrows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_borrows WHERE returned_at IS NULL AND expires_at > NOW()"
+    )
         .fetch_one(&state.db)
         .await?;
 
@@ -430,7 +472,7 @@ pub async fn get_admin_stats(
         .fetch_one(&state.db)
         .await?;
 
-    let total_history_records: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM borrow_history")
+    let total_history_records: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_borrows")
         .fetch_one(&state.db)
         .await?;
 
@@ -454,20 +496,20 @@ pub async fn get_borrow_history(
     let records: Vec<BorrowHistoryRecord> = sqlx::query_as(
         r#"
         SELECT
-            h.id,
-            h.book_id,
+            ub.id,
+            ub.book_id,
             b.title as book_title,
-            h.user_id,
+            ub.user_id,
             u.display_name as user_name,
             u.email as user_email,
-            h.borrowed_at,
-            h.returned_at,
-            h.expired
-        FROM borrow_history h
-        JOIN books b ON h.book_id = b.id
-        JOIN users u ON h.user_id = u.id
-        ORDER BY h.borrowed_at DESC
-        LIMIT 50
+            ub.borrowed_at,
+            ub.returned_at,
+            (ub.returned_at IS NULL AND ub.expires_at < NOW()) as expired
+        FROM user_borrows ub
+        JOIN books b ON ub.book_id = b.id
+        JOIN users u ON ub.user_id = u.id
+        ORDER BY ub.borrowed_at DESC
+        LIMIT 100
         "#,
     )
     .fetch_all(&state.db)
@@ -477,12 +519,14 @@ pub async fn get_borrow_history(
 }
 
 /// POST /api/books/:id/borrow
+/// Multi-user: each user can borrow any book independently. Digital library = unlimited copies.
 pub async fn borrow_book(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     auth_user: AuthUser,
     payload: Option<Json<BorrowRequest>>,
-) -> AppResult<Json<Book>> {
+) -> AppResult<Json<serde_json::Value>> {
+    // Check book exists
     let book: Option<Book> = sqlx::query_as("SELECT * FROM books WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.db)
@@ -490,8 +534,17 @@ pub async fn borrow_book(
 
     let book = book.ok_or_else(|| AppError::NotFound("Book not found".into()))?;
 
-    if book.status == "Borrowed" {
-        return Err(AppError::Conflict("หนังสือเล่มนี้ถูกยืมไปแล้ว".into()));
+    // Check user doesn't already have this book borrowed (active borrow)
+    let already_borrowed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM user_borrows WHERE user_id = $1 AND book_id = $2 AND returned_at IS NULL AND expires_at > NOW())"
+    )
+    .bind(auth_user.id)
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+
+    if already_borrowed {
+        return Err(AppError::Conflict("คุณกำลังยืมหนังสือเล่มนี้อยู่แล้ว".into()));
     }
 
     let max_days = if book.max_borrow_days > 0 { book.max_borrow_days as i64 } else { 14 };
@@ -502,27 +555,25 @@ pub async fn borrow_book(
 
     let expires_at = Utc::now() + Duration::days(requested_days);
 
-    let updated_book: Book = sqlx::query_as(
-        r#"
-        UPDATE books
-        SET status       = 'Borrowed',
-            borrowed_by  = $1,
-            expires_at   = $2,
-            borrow_count = borrow_count + 1,
-            updated_at   = NOW()
-        WHERE id = $3
-        RETURNING *
-        "#,
+    // Insert into user_borrows (multi-user borrow record)
+    let borrow_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO user_borrows (user_id, book_id, expires_at) VALUES ($1, $2, $3) RETURNING id"
     )
     .bind(auth_user.id)
-    .bind(expires_at)
     .bind(id)
+    .bind(expires_at)
     .fetch_one(&state.db)
     .await?;
 
-    // Insert borrow history
+    // Increment global borrow_count on book
+    let _ = sqlx::query("UPDATE books SET borrow_count = borrow_count + 1, updated_at = NOW() WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await;
+
+    // Also insert into legacy borrow_history for admin stats
     let _ = sqlx::query(
-        "INSERT INTO borrow_history (book_id, user_id) VALUES ($1, $2)",
+        "INSERT INTO borrow_history (book_id, user_id) VALUES ($1, $2)"
     )
     .bind(id)
     .bind(auth_user.id)
@@ -533,53 +584,48 @@ pub async fn borrow_book(
     let mut redis_conn = state.redis.clone();
     let _ = invalidate_caches_for_book(&mut redis_conn, &id.to_string()).await;
 
-    Ok(Json(updated_book))
+    Ok(Json(serde_json::json!({
+        "message": "ยืมหนังสือสำเร็จ",
+        "borrow_id": borrow_id,
+        "book_id": id,
+        "expires_at": expires_at,
+        "book": {
+            "id": book.id,
+            "title": book.title,
+            "author": book.author,
+            "pdf_url": book.pdf_url,
+            "max_borrow_days": book.max_borrow_days,
+        }
+    })))
 }
 
-/// POST /api/books/:id/return
+/// POST /api/books/:id/return  (return by book_id for current user)
 pub async fn return_book(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     auth_user: AuthUser,
-) -> AppResult<Json<Book>> {
-    let book: Option<Book> = sqlx::query_as("SELECT * FROM books WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&state.db)
-        .await?;
-
-    let book = book.ok_or_else(|| AppError::NotFound("Book not found".into()))?;
-
-    if book.status != "Borrowed" {
-        return Err(AppError::BadRequest("Book is not currently borrowed".into()));
-    }
-
-    if book.borrowed_by != Some(auth_user.id) && auth_user.role != "admin" {
-        return Err(AppError::Auth(
-            "You can only return books you have borrowed".into(),
-        ));
-    }
-
-    let updated_book: Book = sqlx::query_as(
+) -> AppResult<Json<serde_json::Value>> {
+    // Find the active borrow record for this user+book
+    let affected = sqlx::query(
         r#"
-        UPDATE books
-        SET status      = 'Available',
-            borrowed_by = NULL,
-            expires_at  = NULL,
-            updated_at  = NOW()
-        WHERE id = $1
-        RETURNING *
+        UPDATE user_borrows
+        SET returned_at = NOW()
+        WHERE user_id = $1 AND book_id = $2 AND returned_at IS NULL
         "#,
     )
+    .bind(auth_user.id)
     .bind(id)
-    .fetch_one(&state.db)
-    .await?;
+    .execute(&state.db)
+    .await?
+    .rows_affected();
 
+    if affected == 0 {
+        return Err(AppError::NotFound("ไม่พบรายการยืมที่ยังค้างอยู่สำหรับหนังสือเล่มนี้".into()));
+    }
+
+    // Mark legacy borrow_history as returned too
     let _ = sqlx::query(
-        r#"
-        UPDATE borrow_history
-        SET returned_at = NOW()
-        WHERE book_id = $1 AND user_id = $2 AND returned_at IS NULL
-        "#,
+        "UPDATE borrow_history SET returned_at = NOW() WHERE book_id = $1 AND user_id = $2 AND returned_at IS NULL"
     )
     .bind(id)
     .bind(auth_user.id)
@@ -589,7 +635,64 @@ pub async fn return_book(
     let mut redis_conn = state.redis.clone();
     let _ = invalidate_caches_for_book(&mut redis_conn, &id.to_string()).await;
 
-    Ok(Json(updated_book))
+    Ok(Json(serde_json::json!({ "message": "คืนหนังสือสำเร็จ" })))
+}
+
+/// POST /api/borrows/:borrow_id/return  (return by borrow_id)
+pub async fn return_by_borrow_id(
+    State(state): State<AppState>,
+    Path(borrow_id): Path<Uuid>,
+    auth_user: AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    let row = sqlx::query_scalar::<_, Uuid>(
+        "UPDATE user_borrows SET returned_at = NOW() WHERE id = $1 AND user_id = $2 AND returned_at IS NULL RETURNING book_id"
+    )
+    .bind(borrow_id)
+    .bind(auth_user.id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let book_id = row.ok_or_else(|| AppError::NotFound("ไม่พบรายการยืมนี้".into()))?;
+
+    // Invalidate caches for this book
+    let mut redis_conn = state.redis.clone();
+    let _ = invalidate_caches_for_book(&mut redis_conn, &book_id.to_string()).await;
+
+    Ok(Json(serde_json::json!({ "message": "คืนหนังสือสำเร็จ", "book_id": book_id })))
+}
+
+/// GET /api/me/borrows — User's active bookshelf
+pub async fn my_borrows(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+) -> AppResult<Json<Vec<UserBorrowEntry>>> {
+    let entries: Vec<UserBorrowEntry> = sqlx::query_as(
+        r#"
+        SELECT
+            ub.id         AS borrow_id,
+            ub.book_id,
+            b.title,
+            b.author,
+            b.genre,
+            b.cover_url,
+            b.pdf_url,
+            b.language,
+            b.max_borrow_days,
+            ub.borrowed_at,
+            ub.expires_at
+        FROM user_borrows ub
+        JOIN books b ON ub.book_id = b.id
+        WHERE ub.user_id = $1
+          AND ub.returned_at IS NULL
+          AND ub.expires_at > NOW()
+        ORDER BY ub.borrowed_at DESC
+        "#,
+    )
+    .bind(auth_user.id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(entries))
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
