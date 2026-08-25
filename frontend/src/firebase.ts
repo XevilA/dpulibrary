@@ -4,14 +4,15 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 
-// Firebase configuration (Supports ENV or default DPU Library Firebase project)
+// Official DPU Library Firebase project configuration
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyDPU-Library-Mock-Production-ApiKey',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'dpu-library-auth.firebaseapp.com',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'dpu-library-auth',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'dpu-library-auth.appspot.com',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '1038472918234',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1038472918234:web:9f8e7d6c5b4a3210',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDFGRMe1FGmOd9qlSkW7Uxpf2klyXmoNGs",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "dpuelibrary.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "dpuelibrary",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "dpuelibrary.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "396381797493",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:396381797493:web:de814ad9782e3e206c0c3c",
+  measurementId: "G-E65HJMQPH3"
 };
 
 // Initialize Firebase App singleton
@@ -23,7 +24,7 @@ export const auth = getAuth(app);
 // Initialize Google Auth Provider with DPU Hosted Domain constraint
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
-  hd: 'dpu.ac.th', // Restrict Google sign-in to @dpu.ac.th
+  hd: 'dpu.ac.th', // Enforce DPU institutional email @dpu.ac.th
   prompt: 'select_account',
 });
 
